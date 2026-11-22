@@ -17,8 +17,16 @@ import {
   EyeOff,
   PanelLeft,
   Menu,
+  Volume2,
+  VolumeX,
+  Cloud,
+  CheckCircle2,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useApp } from '../context/AppContext';
+import { useSoundEffects } from '../hooks/useSoundEffects';
+import { isSupabaseConfigured } from '../lib/supabase';
+import { isGeminiClientConfigured } from '../services/geminiApi';
 import { GlassCard } from '../components/GlassCard';
 import { NavLayout } from '../types';
 
@@ -31,11 +39,19 @@ export const ProfilePage: React.FC = () => {
     setSidebarOpen,
     hideBalances,
     toggleHideBalances,
+    soundEnabled,
+    toggleSoundEnabled,
     user,
+    isCloudConnected,
+    signOut,
+    isMacroLive,
+    isMarketLive,
+    marketSourceLabel,
     setScreen,
     aiHistory,
     deleteAiAnalysis,
   } = useApp();
+  const { playInsight } = useSoundEffects();
 
   const [expandedAiId, setExpandedAiId] = useState<string | null>(null);
 
@@ -53,7 +69,7 @@ export const ProfilePage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-5 pb-28 animate-enter">
+    <div className="space-y-5 pb-28">
       {/* Header */}
       <header className="pt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
@@ -137,6 +153,49 @@ export const ProfilePage: React.FC = () => {
             </button>
           </div>
 
+          {/* Sound Effects Toggle */}
+          <div className="flex items-center justify-between gap-3 pt-3 border-t glass-divider">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl glass-pill flex items-center justify-center">
+                {soundEnabled ? (
+                  <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <VolumeX className="w-4 h-4 text-muted" />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-primary">Efeitos sonoros</p>
+                <p className="text-[11px] text-secondary">
+                  Feedback sutil na carteira e análises IA
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={soundEnabled}
+              aria-label="Alternar efeitos sonoros"
+              onClick={() => {
+                const next = !soundEnabled;
+                toggleSoundEnabled();
+                if (next) playInsight(true);
+              }}
+              className={`relative w-12 h-7 rounded-full p-1 transition-colors duration-300 cursor-pointer border ${
+                soundEnabled
+                  ? 'bg-emerald-500/85 border-emerald-400/60'
+                  : 'bg-slate-300/70 dark:bg-slate-700/70 border-transparent'
+              }`}
+            >
+              <motion.span
+                layout
+                transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+                className={`block w-5 h-5 rounded-full bg-white shadow-sm ${
+                  soundEnabled ? 'ml-auto' : 'mr-auto'
+                }`}
+              />
+            </button>
+          </div>
+
           {/* Privacy Balances */}
           <div className="flex items-center justify-between gap-3 pt-3 border-t glass-divider">
             <div className="flex items-center gap-3">
@@ -211,12 +270,52 @@ export const ProfilePage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setScreen('login')}
+              onClick={() => void signOut()}
               className="tap-press py-2.5 px-3 rounded-2xl glass-pill text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
               Sair da conta
             </button>
+          </div>
+        </GlassCard>
+      </section>
+
+      {/* Integrations Status Card (Fase 2) */}
+      <section className="space-y-2.5">
+        <div className="flex items-center gap-2">
+          <Cloud className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+          <h2 className="text-base font-display font-bold text-primary">Conexões em Tempo Real</h2>
+        </div>
+        <GlassCard padding="md" className="rounded-3xl space-y-2.5 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-secondary">BCB + AwesomeAPI (Selic, CDI, Dólar)</span>
+            <span className="inline-flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {isMacroLive ? 'Conectado' : 'Cache'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t glass-divider">
+            <span className="text-secondary">Brapi B3 (Ações e FIIs)</span>
+            <span className="inline-flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {isMarketLive ? marketSourceLabel : 'Referência'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t glass-divider">
+            <span className="text-secondary">Google Gemini IA (Aporte & Dona Rê)</span>
+            <span className="font-bold text-primary">
+              {isGeminiClientConfigured ? 'Gemini 2.5 Flash' : 'Aguardando chave .env'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t glass-divider">
+            <span className="text-secondary">Supabase (Login & Banco)</span>
+            <span className="font-bold text-primary">
+              {isCloudConnected
+                ? 'Sincronizado na nuvem'
+                : isSupabaseConfigured
+                  ? 'Pronto (faça login)'
+                  : 'Modo Local (.env.local)'}
+            </span>
           </div>
         </GlassCard>
       </section>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { Search, TrendingUp, TrendingDown, Sparkles, PlusCircle, Menu } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -9,20 +10,37 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import { MARKET_ASSETS } from '../data/mockMarket';
-import { ChartPeriod, MarketAsset } from '../types';
+import { ChartPeriod, MarketAsset, PricePoint } from '../types';
 import { GlassCard } from '../components/GlassCard';
+import { RenVestLoader } from '../components/RenVestLoader';
+import { SPRING_PILL } from '../components/MotionPrimitives';
 import { useApp } from '../context/AppContext';
+import { fetchBrapiAssetDetail, searchB3Tickers } from '../services/marketApi';
 
 const PERIODS: ChartPeriod[] = ['1M', '6M', '1A', '5A'];
 
 export const ExplorePage: React.FC = () => {
-  const { exploreTicker, openAssetInAi, setQuickAddTicker, setActiveTab, navLayout, setSidebarOpen } = useApp();
+  const {
+    exploreTicker,
+    openAssetInAi,
+    setQuickAddTicker,
+    setActiveTab,
+    navLayout,
+    setSidebarOpen,
+    marketAssets,
+  } = useApp();
 
   const [query, setQuery] = useState('');
   const [filterType, setFilterType] = useState<'Todos' | 'Ação' | 'FII'>('Todos');
   const [selectedTicker, setSelectedTicker] = useState<string>(exploreTicker || 'PETR4');
   const [period, setPeriod] = useState<ChartPeriod>('1A');
+  const [liveDetail, setLiveDetail] = useState<{
+    asset: MarketAsset;
+    points: PricePoint[];
+    isLive: boolean;
+  } | null>(null);
+  const [loadingChart, setLoadingChart] = useState<boolean>(false);
+  const [remoteSearchTickers, setRemoteSearchTickers] = useState<string[]>([]);
 
   useEffect(() => {
     if (exploreTicker) {
@@ -30,8 +48,38 @@ export const ExplorePage: React.FC = () => {
     }
   }, [exploreTicker]);
 
+  // Fetch real Brapi historical chart when ticker or period changes
+  useEffect(() => {
+    let active = true;
+    setLoadingChart(true);
+    fetchBrapiAssetDetail(selectedTicker, period)
+      .then((res) => {
+        if (!active) return;
+        setLiveDetail(res);
+      })
+      .finally(() => {
+        if (active) setLoadingChart(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTicker, period]);
+
+  // Optional live B3 ticker search via Brapi when user types
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setRemoteSearchTickers([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchB3Tickers(q).then(setRemoteSearchTickers);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const filteredAssets = useMemo(() => {
-    return MARKET_ASSETS.filter((asset) => {
+    return marketAssets.filter((asset) => {
       const matchesType = filterType === 'Todos' || asset.type === filterType;
       const q = query.trim().toLowerCase();
       const matchesQuery =
@@ -41,19 +89,25 @@ export const ExplorePage: React.FC = () => {
         asset.sector.toLowerCase().includes(q);
       return matchesType && matchesQuery;
     });
-  }, [query, filterType]);
+  }, [query, filterType, marketAssets]);
+
+  const fallbackAsset: MarketAsset =
+    marketAssets.find((a) => a.ticker === selectedTicker) || marketAssets[0];
 
   const activeAsset: MarketAsset =
-    MARKET_ASSETS.find((a) => a.ticker === selectedTicker) || MARKET_ASSETS[0];
+    liveDetail && liveDetail.asset.ticker === selectedTicker ? liveDetail.asset : fallbackAsset;
 
-  const chartData = activeAsset.history[period];
+  const chartData =
+    liveDetail && liveDetail.asset.ticker === selectedTicker
+      ? liveDetail.points
+      : activeAsset.history[period];
   const firstPrice = chartData[0]?.price || activeAsset.price;
   const lastPrice = chartData[chartData.length - 1]?.price || activeAsset.price;
   const periodReturn = ((lastPrice - firstPrice) / firstPrice) * 100;
   const isPositive = periodReturn >= 0;
 
   return (
-    <div className="space-y-5 pb-28 animate-enter">
+    <div className="space-y-5 pb-28">
       {/* Header */}
       <header className="pt-2 flex items-center gap-2.5">
         {navLayout !== 'bottom' && (
@@ -133,7 +187,19 @@ export const ExplorePage: React.FC = () => {
               </button>
             );
           })}
-          {filteredAssets.length === 0 && (
+          {remoteSearchTickers
+            .filter((t) => !filteredAssets.some((a) => a.ticker === t))
+            .map((ticker) => (
+              <button
+                key={ticker}
+                type="button"
+                onClick={() => setSelectedTicker(ticker)}
+                className="px-3.5 py-2 rounded-2xl text-xs font-bold shrink-0 glass-pill text-emerald-700 dark:text-emerald-300 border-emerald-500/30 cursor-pointer"
+              >
+                {ticker} (B3)
+              </button>
+            ))}
+          {filteredAssets.length === 0 && remoteSearchTickers.length === 0 && (
             <span className="text-xs text-muted py-1">Nenhum ativo encontrado para "{query}".</span>
           )}
         </div>
@@ -172,7 +238,12 @@ export const ExplorePage: React.FC = () => {
         </div>
 
         {/* Interactive Historical Area Chart */}
-        <div className="h-56 w-full">
+        <div className="relative h-56 w-full">
+          {loadingChart && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl glass-card-subtle">
+              <RenVestLoader variant="inline" size="md" message="Buscando histórico B3..." />
+            </div>
+          )}
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 10, right: 6, left: -18, bottom: 0 }}>
               <defs>
@@ -227,20 +298,31 @@ export const ExplorePage: React.FC = () => {
 
         {/* Period Filter Buttons: 1M, 6M, 1A, 5A */}
         <div className="grid grid-cols-4 gap-1.5 p-1 rounded-2xl glass-card-subtle">
-          {PERIODS.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPeriod(p)}
-              className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                period === p
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
-                  : 'text-secondary hover:text-primary'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
+          {PERIODS.map((p) => {
+            const active = period === p;
+            return (
+              <motion.button
+                key={p}
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setPeriod(p)}
+                className={`relative py-2 rounded-xl text-xs font-bold transition-colors duration-200 cursor-pointer ${
+                  active
+                    ? 'text-emerald-700 dark:text-emerald-300'
+                    : 'text-secondary hover:text-primary'
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="explore-period-tab"
+                    transition={SPRING_PILL}
+                    className="absolute inset-0 rounded-xl bg-emerald-500/20 border border-emerald-500/30"
+                  />
+                )}
+                <span className="relative z-10">{p}</span>
+              </motion.button>
+            );
+          })}
         </div>
 
         {/* Key Fundamentals */}

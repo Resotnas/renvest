@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Sparkles,
   CheckCircle2,
@@ -26,14 +27,13 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { useApp } from '../context/AppContext';
+import { useSoundEffects } from '../hooks/useSoundEffects';
 import { GlassCard } from '../components/GlassCard';
 import { DeepDiveSheet } from '../components/DeepDiveSheet';
+import { RenVestLoader } from '../components/RenVestLoader';
+import { SPRING_PILL, SUBTAB_VARIANTS } from '../components/MotionPrimitives';
 import { AiAnalysisResult, AiMode } from '../types';
-import {
-  generateAutoAllocation,
-  generateFilteredAllocation,
-  generateSpecificAssetAnalysis,
-} from '../services/mockAiEngine';
+import { generateSmartAllocation } from '../services/geminiApi';
 import { MARKET_ASSETS } from '../data/mockMarket';
 
 const QUICK_AMOUNTS = [500, 1000, 2500, 5000];
@@ -46,7 +46,17 @@ const FILTER_OPTIONS: ('Ações' | 'FIIs' | 'Tesouro Direto' | 'CDBs' | 'LCI/LCA
 ];
 
 export const AiInvestPage: React.FC = () => {
-  const { user, portfolio, saveAiAnalysis, aiPreset, clearAiPreset, navLayout, setSidebarOpen } = useApp();
+  const {
+    user,
+    portfolio,
+    macroIndicators,
+    saveAiAnalysis,
+    aiPreset,
+    clearAiPreset,
+    navLayout,
+    setSidebarOpen,
+  } = useApp();
+  const { playInsight } = useSoundEffects();
 
   const [mode, setMode] = useState<AiMode>('auto');
   const [amountInput, setAmountInput] = useState<string>('1000');
@@ -56,7 +66,9 @@ export const AiInvestPage: React.FC = () => {
   const [tickerInput, setTickerInput] = useState<string>('PETR4');
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>('IA analisando seu aporte...');
   const [result, setResult] = useState<AiAnalysisResult | null>(null);
+  const [usedRealGemini, setUsedRealGemini] = useState<boolean>(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [deepDiveCategory, setDeepDiveCategory] = useState<string | null>(null);
 
@@ -79,28 +91,44 @@ export const AiInvestPage: React.FC = () => {
     );
   };
 
-  const runAnalysis = (
+  const runAnalysis = async (
     targetMode: AiMode = mode,
     targetAmount: number = parseFloat(amountInput.replace(',', '.')) || 1000,
     targetFilters = selectedFilters,
     targetTicker = tickerInput
   ) => {
     if (targetAmount <= 0) return;
+    setLoadingMessage(
+      targetMode === 'specific'
+        ? `IA analisando ${targetTicker || 'o ativo'} e projeções...`
+        : targetMode === 'filtered'
+          ? 'IA montando aporte nas classes escolhidas...'
+          : 'IA analisando seu perfil e carteira...'
+    );
     setIsLoading(true);
     setSavedId(null);
 
-    setTimeout(() => {
-      let generated: AiAnalysisResult;
-      if (targetMode === 'auto') {
-        generated = generateAutoAllocation(targetAmount, user.investorProfile, portfolio);
-      } else if (targetMode === 'filtered') {
-        generated = generateFilteredAllocation(targetAmount, targetFilters, user.investorProfile);
-      } else {
-        generated = generateSpecificAssetAnalysis(targetAmount, targetTicker, user.investorProfile);
-      }
-      setResult(generated);
-      setIsLoading(false);
-    }, 520);
+    const startedAt = Date.now();
+    const { result: generated, usedRealAi } = await generateSmartAllocation({
+      mode: targetMode,
+      amount: targetAmount,
+      profile: user.investorProfile,
+      portfolio,
+      selectedFilters: targetFilters,
+      ticker: targetTicker,
+      macro: macroIndicators,
+    });
+
+    // Ensure loader shows cleanly for at least 750ms even on fast fallback
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < 750) {
+      await new Promise((r) => setTimeout(r, 750 - elapsed));
+    }
+
+    setResult(generated);
+    setUsedRealGemini(usedRealAi);
+    setIsLoading(false);
+    playInsight();
   };
 
   const handleSave = () => {
@@ -118,7 +146,7 @@ export const AiInvestPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 pb-28 animate-enter">
+    <div className="space-y-5 pb-28">
       {/* Header */}
       <header className="pt-2 flex items-start gap-2.5">
         {navLayout !== 'bottom' && (
@@ -134,7 +162,7 @@ export const AiInvestPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-0.5">
             <Sparkles className="w-3.5 h-3.5" />
-            RenVest IA • Gemini Engine (Simulado)
+            RenVest IA • {usedRealGemini ? 'Gemini 2.5 Flash' : 'Motor Inteligente'}
           </div>
           <h1 className="text-2xl font-display font-extrabold text-primary leading-tight">
             Aporte Inteligente
@@ -146,7 +174,7 @@ export const AiInvestPage: React.FC = () => {
         </div>
       </header>
 
-      {/* 3-Mode Segmented Control */}
+      {/* 3-Mode Segmented Control with Fluid Sliding Pill */}
       <div className="grid grid-cols-3 gap-1.5 p-1.5 rounded-2xl glass-card-subtle">
         {(
           [
@@ -158,22 +186,30 @@ export const AiInvestPage: React.FC = () => {
           const Icon = m.icon;
           const active = mode === m.id;
           return (
-            <button
+            <motion.button
               key={m.id}
               type="button"
+              whileTap={{ scale: 0.96 }}
               onClick={() => {
                 setMode(m.id);
                 setResult(null);
               }}
-              className={`py-2.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`relative py-2.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors duration-200 cursor-pointer ${
                 active
-                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30 shadow-sm'
+                  ? 'text-emerald-700 dark:text-emerald-300'
                   : 'text-secondary hover:text-primary'
               }`}
             >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span>{m.label}</span>
-            </button>
+              {active && (
+                <motion.span
+                  layoutId="ai-mode-tab"
+                  transition={SPRING_PILL}
+                  className="absolute inset-0 rounded-xl bg-emerald-500/20 border border-emerald-500/30 shadow-sm"
+                />
+              )}
+              <Icon className="w-3.5 h-3.5 shrink-0 relative z-10" />
+              <span className="relative z-10">{m.label}</span>
+            </motion.button>
           );
         })}
       </div>
@@ -215,69 +251,86 @@ export const AiInvestPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Mode 2: Category Filter Chips */}
-        {mode === 'filtered' && (
-          <div className="pt-1">
-            <label className="block text-xs font-semibold text-secondary mb-2">
-              Escolha onde quer concentrar este aporte
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {FILTER_OPTIONS.map((cat) => {
-                const selected = selectedFilters.includes(cat);
-                return (
-                  <button
-                    key={cat}
+        {/* Mode 2 & 3 Dynamic Controls with AnimatePresence */}
+        <AnimatePresence mode="wait">
+          {mode === 'filtered' && (
+            <motion.div
+              key="mode-filtered"
+              variants={SUBTAB_VARIANTS}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="pt-1"
+            >
+              <label className="block text-xs font-semibold text-secondary mb-2">
+                Escolha onde quer concentrar este aporte
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {FILTER_OPTIONS.map((cat) => {
+                  const selected = selectedFilters.includes(cat);
+                  return (
+                    <motion.button
+                      key={cat}
+                      type="button"
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => toggleFilter(cat)}
+                      className={`px-3.5 py-2 rounded-2xl text-xs font-semibold transition-colors duration-200 cursor-pointer border ${
+                        selected
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-700 dark:text-emerald-300'
+                          : 'glass-pill text-secondary hover:text-primary'
+                      }`}
+                    >
+                      {selected ? '✓ ' : '+ '}
+                      {cat}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {mode === 'specific' && (
+            <motion.div
+              key="mode-specific"
+              variants={SUBTAB_VARIANTS}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="pt-1 space-y-2.5"
+            >
+              <label className="block text-xs font-semibold text-secondary">
+                Digite o ticker da Ação ou FII (B3)
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={tickerInput}
+                  onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                  placeholder="Ex: PETR4, MXRF11, WEGE3"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl glass-pill text-sm font-bold uppercase text-primary placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                {MARKET_ASSETS.slice(0, 7).map((a) => (
+                  <motion.button
+                    key={a.ticker}
                     type="button"
-                    onClick={() => toggleFilter(cat)}
-                    className={`px-3.5 py-2 rounded-2xl text-xs font-semibold transition-all cursor-pointer border ${
-                      selected
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-600 dark:text-emerald-300'
-                        : 'glass-pill text-secondary hover:text-primary'
+                    whileTap={{ scale: 0.94 }}
+                    onClick={() => setTickerInput(a.ticker)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 cursor-pointer transition-colors duration-200 ${
+                      tickerInput === a.ticker
+                        ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40'
+                        : 'glass-pill text-secondary'
                     }`}
                   >
-                    {selected ? '✓ ' : '+ '}
-                    {cat}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Mode 3: Specific Ticker Input */}
-        {mode === 'specific' && (
-          <div className="pt-1 space-y-2.5">
-            <label className="block text-xs font-semibold text-secondary">
-              Digite o ticker da Ação ou FII (B3)
-            </label>
-            <div className="relative">
-              <Search className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                placeholder="Ex: PETR4, MXRF11, WEGE3"
-                className="w-full pl-10 pr-4 py-3 rounded-2xl glass-pill text-sm font-bold uppercase text-primary placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-              />
-            </div>
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              {MARKET_ASSETS.slice(0, 7).map((a) => (
-                <button
-                  key={a.ticker}
-                  type="button"
-                  onClick={() => setTickerInput(a.ticker)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 cursor-pointer ${
-                    tickerInput === a.ticker
-                      ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 border border-cyan-500/40'
-                      : 'glass-pill text-secondary'
-                  }`}
-                >
-                  {a.ticker}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+                    {a.ticker}
+                  </motion.button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <button
           type="button"
@@ -526,6 +579,13 @@ export const AiInvestPage: React.FC = () => {
           </p>
         </div>
       )}
+
+      {/* Fullscreen Liquid Glass Loader Overlay */}
+      <RenVestLoader
+        variant="overlay"
+        visible={isLoading}
+        message={loadingMessage}
+      />
 
       {/* Deep Dive Bottom Sheet */}
       <DeepDiveSheet

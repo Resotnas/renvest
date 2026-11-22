@@ -4,6 +4,7 @@ import { ONBOARDING_QUESTIONS, calculateInvestorProfile } from '../data/onboardi
 import { GlassCard } from '../components/GlassCard';
 import { BrandLogo } from '../components/BrandLogo';
 import { useApp } from '../context/AppContext';
+import { useSoundEffects } from '../hooks/useSoundEffects';
 import { InvestorProfile } from '../types';
 
 const PROFILE_META: Record<
@@ -44,6 +45,7 @@ const PROFILE_META: Record<
 
 export const OnboardingPage: React.FC = () => {
   const { setInvestorProfile, setScreen } = useApp();
+  const { playSuccess } = useSoundEffects();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
   const [resultProfile, setResultProfile] = useState<InvestorProfile | null>(null);
@@ -62,6 +64,7 @@ export const OnboardingPage: React.FC = () => {
       const profile = calculateInvestorProfile(nextAnswers);
       setInvestorProfile(profile);
       setResultProfile(profile);
+      playSuccess();
     }
   };
 

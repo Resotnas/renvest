@@ -1,15 +1,20 @@
 import React from 'react';
+import { motion, HTMLMotionProps } from 'framer-motion';
 
-interface GlassCardProps extends React.HTMLAttributes<HTMLDivElement> {
+interface GlassCardProps extends HTMLMotionProps<'div'> {
   variant?: 'default' | 'elevated' | 'subtle' | 'accent';
   padding?: 'none' | 'sm' | 'md' | 'lg';
+  interactive?: boolean;
 }
 
 export const GlassCard: React.FC<GlassCardProps> = ({
   children,
   variant = 'default',
   padding = 'md',
+  interactive = false,
   className = '',
+  onClick,
+  whileTap,
   ...rest
 }) => {
   const variantClasses = {
@@ -26,12 +31,16 @@ export const GlassCard: React.FC<GlassCardProps> = ({
     lg: 'p-5',
   };
 
+  const tapEffect = whileTap ?? (interactive || onClick ? { scale: 0.97 } : undefined);
+
   return (
-    <div
-      className={`${variantClasses[variant]} ${paddingClasses[padding]} rounded-3xl transition-all duration-200 ${className}`}
+    <motion.div
+      onClick={onClick}
+      whileTap={tapEffect}
+      className={`${variantClasses[variant]} ${paddingClasses[padding]} rounded-3xl transition-colors duration-300 ${className}`}
       {...rest}
     >
       {children}
-    </div>
+    </motion.div>
   );
 };

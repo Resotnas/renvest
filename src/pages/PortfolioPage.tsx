@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   Plus,
   Pencil,
@@ -21,8 +22,10 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { useApp } from '../context/AppContext';
+import { useSoundEffects } from '../hooks/useSoundEffects';
 import { GlassCard } from '../components/GlassCard';
 import { AssetModal } from '../components/AssetModal';
+import { STAGGER_CONTAINER, STAGGER_ITEM } from '../components/MotionPrimitives';
 import { PortfolioAsset } from '../types';
 
 export const PortfolioPage: React.FC = () => {
@@ -39,6 +42,7 @@ export const PortfolioPage: React.FC = () => {
     setSidebarOpen,
     navLayout,
   } = useApp();
+  const { playSuccess, playRemove } = useSoundEffects();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<PortfolioAsset | null>(null);
@@ -89,13 +93,15 @@ export const PortfolioPage: React.FC = () => {
   const handleSaveAsset = (data: Omit<PortfolioAsset, 'id' | 'updatedAt'>) => {
     if (editingAsset) {
       updateAsset(editingAsset.id, data);
+      playSuccess();
     } else {
       addAsset(data);
+      playSuccess();
     }
   };
 
   return (
-    <div className="space-y-5 pb-28 animate-enter">
+    <div className="space-y-5 pb-28">
       {/* Header */}
       <header className="pt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
@@ -296,75 +302,92 @@ export const PortfolioPage: React.FC = () => {
           <span className="text-[11px] text-secondary">Toque em Editar para atualizar saldo</span>
         </div>
 
-        {filteredPortfolio.map((item) => {
-          const diff = item.currentValue - item.investedValue;
-          const diffPct = item.investedValue > 0 ? (diff / item.investedValue) * 100 : 0;
+        <motion.div
+          key={categoryFilter}
+          variants={STAGGER_CONTAINER}
+          initial="hidden"
+          animate="show"
+          className="space-y-2.5"
+        >
+          {filteredPortfolio.map((item) => {
+            const diff = item.currentValue - item.investedValue;
+            const diffPct = item.investedValue > 0 ? (diff / item.investedValue) * 100 : 0;
 
-          return (
-            <GlassCard key={item.id} padding="sm" className="rounded-2xl space-y-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-display font-bold text-sm text-primary">{item.name}</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                      {item.category}
-                    </span>
+            return (
+              <GlassCard
+                key={item.id}
+                variants={STAGGER_ITEM}
+                interactive
+                padding="sm"
+                className="rounded-2xl space-y-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-bold text-sm text-primary">{item.name}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                        {item.category}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-secondary flex items-center gap-1 mt-0.5">
+                      <Building2 className="w-3 h-3 text-muted" />
+                      {item.institution} • Atualizado {item.updatedAt}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-secondary flex items-center gap-1 mt-0.5">
-                    <Building2 className="w-3 h-3 text-muted" />
-                    {item.institution} • Atualizado {item.updatedAt}
-                  </p>
+
+                  <div className="text-right tabular-nums">
+                    <p className="font-display font-extrabold text-sm text-primary">
+                      {formatBRL(item.currentValue)}
+                    </p>
+                    <p
+                      className={`text-[11px] font-bold ${
+                        diff >= 0
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {hideBalances
+                        ? '••••'
+                        : `${diff >= 0 ? '+' : ''}${diffPct.toFixed(2)}% (${
+                            diff >= 0 ? '+' : ''
+                          }R$ ${diff.toLocaleString('pt-BR', { minimumFractionDigits: 0 })})`}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="text-right tabular-nums">
-                  <p className="font-display font-extrabold text-sm text-primary">
-                    {formatBRL(item.currentValue)}
-                  </p>
-                  <p
-                    className={`text-[11px] font-bold ${
-                      diff >= 0
-                        ? 'text-emerald-700 dark:text-emerald-400'
-                        : 'text-rose-600 dark:text-rose-400'
-                    }`}
-                  >
-                    {hideBalances
-                      ? '••••'
-                      : `${diff >= 0 ? '+' : ''}${diffPct.toFixed(2)}% (${
-                          diff >= 0 ? '+' : ''
-                        }R$ ${diff.toLocaleString('pt-BR', { minimumFractionDigits: 0 })})`}
-                  </p>
+                <div className="flex items-center justify-between pt-2 border-t glass-divider text-[11px]">
+                  <span className="text-secondary tabular-nums">
+                    Aportado: <strong className="text-primary">{formatBRL(item.investedValue)}</strong>
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingAsset(item);
+                        setModalOpen(true);
+                      }}
+                      className="tap-press inline-flex items-center gap-1 text-secondary hover:text-emerald-600 dark:hover:text-emerald-400 font-semibold cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        deleteAsset(item.id);
+                        playRemove();
+                      }}
+                      className="tap-press inline-flex items-center gap-1 text-secondary hover:text-rose-600 dark:hover:text-rose-400 font-semibold cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Excluir
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 border-t glass-divider text-[11px]">
-                <span className="text-secondary tabular-nums">
-                  Aportado: <strong className="text-primary">{formatBRL(item.investedValue)}</strong>
-                </span>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingAsset(item);
-                      setModalOpen(true);
-                    }}
-                    className="tap-press inline-flex items-center gap-1 text-secondary hover:text-emerald-600 dark:hover:text-emerald-400 font-semibold cursor-pointer"
-                  >
-                    <Pencil className="w-3 h-3" />
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteAsset(item.id)}
-                    className="tap-press inline-flex items-center gap-1 text-secondary hover:text-rose-600 dark:hover:text-rose-400 font-semibold cursor-pointer"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Excluir
-                  </button>
-                </div>
-              </div>
-            </GlassCard>
-          );
-        })}
+              </GlassCard>
+            );
+          })}
+        </motion.div>
 
         {filteredPortfolio.length === 0 && (
           <GlassCard padding="lg" className="text-center space-y-2">

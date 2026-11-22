@@ -10,7 +10,16 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useSoundEffects } from '../hooks/useSoundEffects';
+import { RenVestLoader } from '../components/RenVestLoader';
+import { DonaReEmblem } from '../components/DonaReEmblem';
 import { ChatMessage } from '../types';
+import { askDonaRe } from '../services/geminiApi';
+import {
+  clearUserChatMessages,
+  fetchUserChatMessages,
+  insertUserChatMessage,
+} from '../lib/supabase';
 import { MARKET_ASSETS, MACRO_INDICATORS } from '../data/mockMarket';
 
 const SUGGESTED_PROMPTS = [
@@ -81,7 +90,16 @@ function buildDonaReReply(
 }
 
 export const ChatAssistantPage: React.FC = () => {
-  const { user, portfolio, previousTab, setActiveTab } = useApp();
+  const {
+    user,
+    authUserId,
+    portfolio,
+    macroIndicators,
+    marketAssets,
+    previousTab,
+    setActiveTab,
+  } = useApp();
+  const { playInsight } = useSoundEffects();
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
       const saved = localStorage.getItem(CHAT_STORAGE_KEY);
@@ -95,12 +113,22 @@ export const ChatAssistantPage: React.FC = () => {
   const [showHistoryBanner, setShowHistoryBanner] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Sync chat history from Supabase when logged in
   useEffect(() => {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+    if (!authUserId) return;
+    fetchUserChatMessages(authUserId).then((cloudMsgs) => {
+      if (cloudMsgs.length > 0) setMessages(cloudMsgs);
+    });
+  }, [authUserId]);
 
-  const sendMessage = (text: string) => {
+  useEffect(() => {
+    if (!authUserId) {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping, authUserId]);
+
+  const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isTyping) return;
 
@@ -112,33 +140,62 @@ export const ChatAssistantPage: React.FC = () => {
       timestamp: now,
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const nextHistory = [...messages, userMsg];
+    setMessages(nextHistory);
     setInput('');
     setIsTyping(true);
 
-    setTimeout(() => {
-      const replyText = buildDonaReReply(trimmed, user.investorProfile, portfolio);
-      const aiMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: replyText,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsTyping(false);
-    }, 450);
+    if (authUserId) {
+      void insertUserChatMessage(authUserId, 'user', trimmed);
+    }
+
+    const startedAt = Date.now();
+    const { text: geminiReply, usedRealAi } = await askDonaRe({
+      question: trimmed,
+      profile: user.investorProfile,
+      portfolio,
+      macro: macroIndicators,
+      marketAssets,
+      recentHistory: nextHistory,
+    });
+
+    const elapsed = Date.now() - startedAt;
+    if (!usedRealAi && elapsed < 750) {
+      await new Promise((r) => setTimeout(r, 750 - elapsed));
+    }
+
+    const replyText =
+      geminiReply || buildDonaReReply(trimmed, user.investorProfile, portfolio);
+
+    const aiMsg: ChatMessage = {
+      id: `a-${Date.now()}`,
+      role: 'assistant',
+      content: replyText,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, aiMsg]);
+    setIsTyping(false);
+    playInsight();
+
+    if (authUserId) {
+      void insertUserChatMessage(authUserId, 'assistant', replyText);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage(input);
+      void sendMessage(input);
     }
   };
 
   const handleNewChat = () => {
     setMessages([]);
     setShowHistoryBanner(false);
+    if (authUserId) {
+      void clearUserChatMessages(authUserId);
+    }
   };
 
   const renderFormattedText = (text: string) => {
@@ -169,7 +226,7 @@ export const ChatAssistantPage: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-118px)] sm:h-[calc(100vh-140px)] animate-enter relative">
+    <div className="flex flex-col h-[calc(100vh-118px)] sm:h-[calc(100vh-140px)] relative">
       {/* Top Bar (inspired by reference screenshot) */}
       <header className="flex items-center justify-between pb-3 mb-2 border-b glass-divider shrink-0">
         <div className="flex items-center gap-2.5">
@@ -258,17 +315,8 @@ export const ChatAssistantPage: React.FC = () => {
               <span className="absolute bottom-14 right-16 w-1.5 h-1.5 rounded-full bg-emerald-500/35 blur-[1px]" />
             </div>
 
-            {/* Glowing R Emblem */}
-            <div className="relative mb-5">
-              <div className="absolute -inset-4 rounded-full bg-emerald-500/25 blur-2xl" />
-              <div className="relative w-16 h-16 rounded-[24px] bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 p-[2px] shadow-xl shadow-emerald-500/30">
-                <div className="w-full h-full rounded-[22px] bg-slate-950/90 flex items-center justify-center">
-                  <span className="font-display font-extrabold text-3xl bg-gradient-to-br from-emerald-300 via-teal-200 to-cyan-300 bg-clip-text text-transparent">
-                    R
-                  </span>
-                </div>
-              </div>
-            </div>
+            {/* Animated Liquid Glass Dona Rê Emblem */}
+            <DonaReEmblem />
 
             <h2 className="text-2xl font-display font-extrabold text-primary tracking-tight">
               Como posso ajudar?
@@ -330,20 +378,14 @@ export const ChatAssistantPage: React.FC = () => {
             })}
 
             {isTyping && (
-              <div className="flex justify-start animate-enter">
-                <div className="glass-card rounded-3xl rounded-bl-lg px-4 py-3 inline-flex items-center gap-2 text-xs text-secondary">
-                  <span className="flex gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce"
-                      style={{ animationDelay: '120ms' }}
-                    />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-bounce"
-                      style={{ animationDelay: '240ms' }}
-                    />
-                  </span>
-                  <span>Dona Rê está digitando...</span>
+              <div className="flex justify-start">
+                <div className="glass-card rounded-3xl rounded-bl-lg px-3.5 py-2.5">
+                  <RenVestLoader
+                    variant="inline"
+                    size="sm"
+                    visible={isTyping}
+                    message="Dona Rê analisando..."
+                  />
                 </div>
               </div>
             )}

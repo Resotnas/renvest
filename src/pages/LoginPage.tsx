@@ -2,26 +2,46 @@ import React, { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, Sun, Moon, Sparkles, ShieldCheck } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo';
 import { GlassCard } from '../components/GlassCard';
+import { RenVestLoader } from '../components/RenVestLoader';
 import { useApp } from '../context/AppContext';
+import { isSupabaseConfigured } from '../lib/supabase';
 
 export const LoginPage: React.FC = () => {
-  const { theme, toggleTheme, setScreen, updateUserProfile } = useApp();
+  const { theme, toggleTheme, setScreen, signIn, signUp } = useApp();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('renato@renvest.app');
-  const [password, setPassword] = useState('••••••••');
+  const [email, setEmail] = useState(isSupabaseConfigured ? '' : 'renato@renvest.app');
+  const [password, setPassword] = useState(isSupabaseConfigured ? '' : '••••••••');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isEntering, setIsEntering] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
+    setIsEntering(true);
+
     if (mode === 'register') {
-      updateUserProfile({
-        name: name.trim() || 'Novo Investidor',
-        email: email.trim() || 'investidor@renvest.app',
-        onboardingCompleted: false,
-      });
-      setScreen('onboarding');
+      const res = await signUp(name.trim() || 'Investidor', email.trim(), password);
+      if (res.error) {
+        setErrorMsg(res.error);
+        setIsEntering(false);
+        return;
+      }
+      if (!isSupabaseConfigured) {
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      setIsEntering(false);
     } else {
-      setScreen('app');
+      const res = await signIn(email.trim(), password);
+      if (res.error) {
+        setErrorMsg(res.error);
+        setIsEntering(false);
+        return;
+      }
+      if (!isSupabaseConfigured) {
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      setIsEntering(false);
     }
   };
 
@@ -29,9 +49,9 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-screen flex flex-col justify-between px-5 py-7 animate-enter">
       {/* Top Bar */}
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold px-3 py-1.5 rounded-full glass-pill text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1.5">
+        <span className="text-[11px] font-semibold px-3 py-1.5 rounded-full glass-pill text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5" />
-          Protótipo Visual • Fase 1
+          {isSupabaseConfigured ? 'Supabase Cloud • Ativo' : 'Modo Local • Pronto para Cloud'}
         </span>
         <button
           type="button"
@@ -133,6 +153,12 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
+            {errorMsg && (
+              <div className="rounded-2xl bg-rose-500/12 border border-rose-500/30 px-3.5 py-2.5 text-xs font-medium text-rose-600 dark:text-rose-300">
+                {errorMsg}
+              </div>
+            )}
+
             <button
               type="submit"
               className="w-full py-3.5 rounded-2xl liquid-btn font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer mt-2"
@@ -159,6 +185,12 @@ export const LoginPage: React.FC = () => {
         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
         <span>Dados isolados por usuário • Pronto para Supabase Auth</span>
       </div>
+
+      <RenVestLoader
+        variant="overlay"
+        visible={isEntering}
+        message={mode === 'register' ? 'Preparando seu perfil...' : 'Entrando no RenVest...'}
+      />
     </div>
   );
 };
